@@ -797,5 +797,95 @@ async def umumkan(interaction: discord.Interaction, pesan: str, judul: str = "�
         await interaction.response.send_message(
             f"❌ Bot tidak punya izin mengirim pesan di {channel.mention}.", ephemeral=True
         )
+
+# ====== COMMAND /resetdb ======
+
+class KonfirmasiResetView(discord.ui.View):
+    def __init__(self, pemanggil_id: int):
+        super().__init__(timeout=60)
+        self.pemanggil_id = pemanggil_id
+        self.dikonfirmasi = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.pemanggil_id:
+            await interaction.response.send_message(
+                "❌ Hanya pemanggil command yang bisa mengonfirmasi.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Ya, hapus semua", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def btn_ya(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        self.dikonfirmasi = True
+        self.stop()
+
+        try:
+            cursor.execute("DELETE FROM anggota_job")
+            cursor.execute("DELETE FROM anggota")
+            cursor.execute("DELETE FROM aliansi")
+            conn.commit()
+
+            # Reset AUTOINCREMENT aliansi
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='aliansi'")
+            conn.commit()
+
+            await interaction.followup.send(
+                "✅ Database berhasil di-reset.\n"
+                "Semua data anggota, job, dan aliansi sudah dihapus.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Gagal reset database: {e}", ephemeral=True
+            )
+
+    @discord.ui.button(label="Batal", style=discord.ButtonStyle.secondary, emoji="✖️")
+    async def btn_batal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.dikonfirmasi = False
+        self.stop()
+        await interaction.response.send_message(
+            "✅ Reset dibatalkan. Tidak ada data yang dihapus.", ephemeral=True
+        )
+
+@bot.tree.command(name="resetdb", description="Hapus SEMUA data database klan (khusus Owner server)", guild=discord.Object(id=GUILD_ID))
+async def resetdb(interaction: discord.Interaction):
+    # Pengecekan izin: HANYA owner server
+    owner = interaction.guild.owner
+    if owner is None or interaction.user.id != owner.id:
+        await interaction.response.send_message(
+            "❌ Hanya **Owner server** yang boleh reset database.",
+            ephemeral=True
+        )
+        return
+
+    # Hitung isi database saat ini untuk ditampilkan di peringatan
+    cursor.execute("SELECT COUNT(*) FROM anggota")
+    jumlah_anggota = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM anggota_job")
+    jumlah_job = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM aliansi")
+    jumlah_aliansi = cursor.fetchone()[0]
+
+    embed = discord.Embed(
+        title="⚠️ KONFIRMASI RESET DATABASE",
+        description=(
+            "Kamu akan **menghapus semua data** berikut:\n\n"
+            f"• **{jumlah_anggota}** anggota terdaftar\n"
+            f"• **{jumlah_job}** relasi job\n"
+            f"• **{jumlah_aliansi}** aliansi klan\n\n"
+            "**Tindakan ini tidak bisa dibatalkan.**\n"
+            "Pastikan kamu sudah menjalankan `/export` jika ingin menyimpan backup."
+        ),
+        color=discord.Color.red()
+    )
+    embed.set_footer(text="Klik 'Ya, hapus semua' untuk melanjutkan, atau 'Batal'.")
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=KonfirmasiResetView(interaction.user.id),
+        ephemeral=True
+    )
+
 # ====== JALANKAN BOT ======
 bot.run(TOKEN)
