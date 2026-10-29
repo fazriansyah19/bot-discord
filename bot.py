@@ -473,14 +473,16 @@ async def import_db(interaction: discord.Interaction, file: discord.Attachment):
     )
 
 # ====== DAFTAR JOB ======
-DAFTAR_JOB = [
-    "Ahli Bangunan",
-    "Boss Penjahit",
-    "Pakar Alat & Senjata",
-    "Penyetok Barang",
-    "Petani",
-    "Supervisor MBG",
-]
+JOB_EMOJI = {
+    "Ahli Bangunan": "🏗️",
+    "Boss Penjahit": "🧵",
+    "Pakar Alat & Senjata": "⚔️",
+    "Penyetok Barang": "📦",
+    "Petani": "🧑‍🌾",
+    "Supervisor MBG": "🧑‍🍳",
+}
+
+DAFTAR_JOB = list(JOB_EMOJI.keys())
 
 CHANNEL_PILIH_JOB_ID = 1559965318691029002
 
@@ -489,12 +491,17 @@ CHANNEL_PILIH_JOB_ID = 1559965318691029002
 class PilihJobSelect(discord.ui.Select):
     def __init__(self, guild: discord.Guild):
         options = [
-            discord.SelectOption(label=nama, value=nama, emoji="⚒️")
+            discord.SelectOption(
+                label=nama,
+                value=nama,
+                emoji=JOB_EMOJI.get(nama, "⚒️"),
+                description=f"Job: {nama}",
+            )
             for nama in DAFTAR_JOB
         ]
         super().__init__(
             placeholder="Pilih job kamu di sini...",
-            min_values=0,                      # 0 = boleh lepas semua job
+            min_values=0,
             max_values=len(DAFTAR_JOB),
             options=options,
         )
@@ -576,6 +583,10 @@ async def setupjob(interaction: discord.Interaction):
         )
         return
 
+    daftar_job_teks = "\n".join(
+        f"{emoji} {nama}" for nama, emoji in JOB_EMOJI.items()
+    )
+
     embed = discord.Embed(
         title="⚒️ Pilih Job Kamu",
         description=(
@@ -584,12 +595,7 @@ async def setupjob(interaction: discord.Interaction):
             "Job yang sudah aktif akan tetap terpasang — ubah pilihan kapan saja "
             "dengan membuka dropdown ini lagi.\n\n"
             "**Daftar job:**\n"
-            "🏗️ Ahli Bangunan\n"
-            "🧵 Boss Penjahit\n"
-            "⚔️ Pakar Alat & Senjata\n"
-            "📦 Penyetok Barang\n"
-            "🧑‍🌾 Petani\n"
-            "🧑‍🍳 Supervisor MBG"
+            f"{daftar_job_teks}"
         ),
         color=discord.Color.gold(),
     )
