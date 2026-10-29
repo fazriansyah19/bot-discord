@@ -288,8 +288,23 @@ async def statistik(interaction: discord.Interaction):
 
 
 # ====== FITUR 4: /carijob ======
+async def job_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Saran nama job saat member mengetik."""
+    current_lower = current.lower()
+    cocok = [
+        app_commands.Choice(name=job, value=job)
+        for job in DAFTAR_JOB
+        if current_lower in job.lower()
+    ]
+    return cocok[:25]   # Discord maksimal 25 saran
+
+
 @bot.tree.command(name="carijob", description="Cari anggota berdasarkan job", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(job="Nama job yang dicari (contoh: Ahli Bangunan)")
+@app_commands.describe(job="Pilih atau ketik nama job")
+@app_commands.autocomplete(job=job_autocomplete)
 async def carijob(interaction: discord.Interaction, job: str):
     cursor.execute(
         """SELECT a.nama_ingame, a.discord_id
@@ -320,7 +335,6 @@ async def carijob(interaction: discord.Interaction, job: str):
     )
     embed.set_footer(text=f"Total: {len(hasil)} orang")
     await interaction.response.send_message(embed=embed)
-
 
 # ====== CEK IZIN ADMIN KLAN ======
 def is_admin_klan(member: discord.Member) -> bool:
