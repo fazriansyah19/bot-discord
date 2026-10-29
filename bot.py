@@ -338,9 +338,12 @@ async def carijob(interaction: discord.Interaction, job: str):
 
 # ====== CEK IZIN ADMIN KLAN ======
 def is_admin_klan(member: discord.Member) -> bool:
-    """Cek apakah member punya role Ketua/Tetua/Wakil/Leader."""
+    # Owner server selalu lolos
+    if member == member.guild.owner:
+        return True
+    # Cek nama role
     nama_role = " ".join(r.name.lower() for r in member.roles)
-    return any(k in nama_role for k in ["ketua", "tetua", "wakil", "leader", "admin"])
+    return any(k in nama_role for k in ["Budak Member", "Wakil Rakyat"])
 
 
 # ====== COMMAND /export ======
