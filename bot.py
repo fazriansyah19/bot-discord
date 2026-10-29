@@ -85,92 +85,64 @@ async def on_ready():
         print(f"❌ Gagal sync: {e}")
     print(f"Login sebagai {bot.user}")
 
-# ====== VIEW: SELECT JOB MULTIPLE ======
-class JobSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label=job, value=job, emoji="⚒️")
-            for job in DAFTAR_JOB
-        ]
-        super().__init__(
-            placeholder="Pilih satu atau lebih job kamu...",
-            min_values=1,
-            max_values=len(DAFTAR_JOB),
-            options=options,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        # Nonaktifkan view setelah dipilih, lalu proses penyimpanan
-        self.view.stop()
-        await self.view.selesaikan(interaction, self.values)
-
-
-class JobSelectView(discord.ui.View):
-    def __init__(self, nama: str):
-        super().__init__(timeout=120)
-        self.nama = nama
-        self.add_item(JobSelect())
-
-    async def selesaikan(self, interaction: discord.Interaction, jobs: list):
-        user = interaction.user
-        nama = self.nama
-
-        # Simpan / update nama
-        cursor.execute(
-            "INSERT OR REPLACE INTO anggota (discord_id, nama_ingame) VALUES (?, ?)",
-            (user.id, nama)
-        )
-        # Hapus job lama, ganti dengan yang baru
-        cursor.execute("DELETE FROM anggota_job WHERE discord_id = ?", (user.id,))
-        for j in jobs:
-            cursor.execute(
-                "INSERT OR IGNORE INTO anggota_job (discord_id, job) VALUES (?, ?)",
-                (user.id, j)
-            )
-        conn.commit()
-
-        # Ubah nickname (hanya nama, tanpa job)
-        me = interaction.guild.me
-        target = user
-        nick_baru = buat_nickname(nama)
-
-        if target == interaction.guild.owner:
-            nick_status = "❌ Tidak dapat mengubah nickname Pemilik Server."
-        elif me.top_role <= target.top_role:
-            nick_status = f"❌ Role bot ({me.top_role.name}) lebih rendah dari role anggota ({target.top_role.name})."
-        else:
-            try:
-                await target.edit(nick=nick_baru)
-                nick_status = f"✅ Nickname diubah menjadi: `{nick_baru}`"
-            except discord.Forbidden:
-                nick_status = "❌ Izin ditolak, periksa izin Manage Nicknames."
-            except discord.HTTPException as e:
-                nick_status = f"❌ Gagal ubah nickname: {e}"
-
-        await interaction.response.send_message(
-            f"✅ Terdaftar!\n"
-            f"**Nama in-game:** {nama}\n"
-            f"**Job:** {', '.join(jobs)}\n"
-            f"{nick_status}",
-            ephemeral=True
-        )
-
-    async def on_timeout(self):
-        # Biarkan saja, view akan hilang otomatis
-        pass
-
-
 # ====== COMMAND /daftar ======
 @bot.tree.command(name="daftar", description="Daftarkan nama in-game kamu", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(nama="Nama in-game kamu (nickname Discord akan diubah ke nama ini)")
 async def daftar(interaction: discord.Interaction, nama: str):
-    view = JobSelectView(nama)
+    user = interaction.user
+
+    # Cek apakah sudah pilih job di #pilih-job
+    job_di_server = {r.name for r in user.roles if r.name in DAFTAR_JOB}
+
+    # Simpan / update nama
+    cursor.execute(
+        "INSERT OR REPLACE INTO anggota (discord_id, nama_ingame) VALUES (?, ?)",
+        (user.id, nama)
+    )
+    # Sinkronkan job dari role Discord ke database
+    cursor.execute("DELETE FROM anggota_job WHERE discord_id = ?", (user.id,))
+    for j in job_di_server:
+        cursor.execute(
+            "INSERT OR IGNORE INTO anggota_job (discord_id, job) VALUES (?, ?)",
+            (user.id, j)
+        )
+    conn.commit()
+
+    # Ubah nickname (hanya nama, tanpa job)
+    me = interaction.guild.me
+    target = user
+    nick_baru = buat_nickname(nama)
+
+    if target == interaction.guild.owner:
+        nick_status = "❌ Tidak dapat mengubah nickname Pemilik Server."
+    elif me.top_role <= target.top_role:
+        nick_status = f"❌ Role bot ({me.top_role.name}) lebih rendah dari role anggota ({target.top_role.name})."
+    else:
+        try:
+            await target.edit(nick=nick_baru)
+            nick_status = f"✅ Nickname diubah menjadi: `{nick_baru}`"
+        except discord.Forbidden:
+            nick_status = "❌ Izin ditolak, periksa izin Manage Nicknames."
+        except discord.HTTPException as e:
+            nick_status = f"❌ Gagal ubah nickname: {e}"
+
+    # Pesan balasan
+    job_str = ", ".join(sorted(job_di_server)) if job_di_server else "Belum dipilih"
+    peringatan = ""
+    if not job_di_server:
+        peringatan = (
+            "\n\n⚠️ Kamu belum memilih job. "
+            "Buka `#pilih-job` dan pilih job lewat dropdown."
+        )
+
     await interaction.response.send_message(
-        f"Halo **{nama}**! Silakan pilih job kamu (bisa lebih dari satu):",
-        view=view,
+        f"✅ Terdaftar!\n"
+        f"**Nama in-game:** {nama}\n"
+        f"**Job:** {job_str}\n"
+        f"{nick_status}"
+        f"{peringatan}",
         ephemeral=True
     )
-
 
 # ====== COMMAND /ceknama ======
 @bot.tree.command(name="ceknama", description="Cek nama in-game seseorang", guild=discord.Object(id=GUILD_ID))
