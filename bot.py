@@ -467,7 +467,6 @@ class PilihJobSelect(discord.ui.Select):
                 label=nama,
                 value=nama,
                 emoji=JOB_EMOJI.get(nama, "⚒️"),
-                description=f"Job: {nama}",
             )
             for nama in DAFTAR_JOB
         ]
@@ -555,28 +554,33 @@ async def setupjob(interaction: discord.Interaction):
         )
         return
 
-    daftar_job_teks = "\n".join(
-        f"{emoji} {nama}" for nama, emoji in JOB_EMOJI.items()
-    )
+    try:
+        daftar_job_teks = "\n".join(
+            f"{emoji} {nama}" for nama, emoji in JOB_EMOJI.items()
+        )
 
-    embed = discord.Embed(
-        title="⚒️ Pilih Job Kamu",
-        description=(
-            "Klik dropdown di bawah untuk memilih job kamu.\n"
-            "**Bisa pilih lebih dari satu job.**\n\n"
-            "Job yang sudah aktif akan tetap terpasang — ubah pilihan kapan saja "
-            "dengan membuka dropdown ini lagi.\n\n"
-            "**Daftar job:**\n"
-            f"{daftar_job_teks}"
-        ),
-        color=discord.Color.gold(),
-    )
+        embed = discord.Embed(
+            title="⚒️ Pilih Job Kamu",
+            description=(
+                "Klik dropdown di bawah untuk memilih job kamu.\n"
+                "**Bisa pilih lebih dari satu job.**\n\n"
+                "Job yang sudah aktif akan tetap terpasang — ubah pilihan kapan saja "
+                "dengan membuka dropdown ini lagi.\n\n"
+                "**Daftar job:**\n"
+                f"{daftar_job_teks}"
+            ),
+            color=discord.Color.gold(),
+        )
 
-    await channel.send(embed=embed, view=PilihJobView(interaction.guild))
+        await channel.send(embed=embed, view=PilihJobView(interaction.guild))
 
-    await interaction.response.send_message(
-        f"✅ Pesan pilih-job dikirim di {channel.mention}.", ephemeral=True
-    )
-
+        await interaction.response.send_message(
+            f"✅ Pesan pilih-job dikirim di {channel.mention}.", ephemeral=True
+        )
+    except Exception as e:
+        print(f"❌ Gagal setupjob: {e}")
+        await interaction.response.send_message(
+            f"❌ Gagal mengirim pesan pilih-job: {e}", ephemeral=True
+        )
 # ====== JALANKAN BOT ======
 bot.run(TOKEN)
