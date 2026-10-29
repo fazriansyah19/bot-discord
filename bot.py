@@ -8,6 +8,7 @@ from datetime import datetime
 # ====== KONFIGURASI ======
 TOKEN = os.environ.get("DISCORD_TOKEN")
 GUILD_ID = 1559949579066146900
+CHANNEL_PENGUMUMAN_ID = 1559960943465861120
 
 # ====== DAFTAR JOB (untuk select menu) ======
 DAFTAR_JOB = [
@@ -735,8 +736,6 @@ def role_pengumuman_user(member: discord.Member) -> str | None:
     judul="Judul pengumuman (opsional)",
 )
 
-CHANNEL_PENGUMUMAN_ID = 1559960943465861120
-
 async def umumkan(interaction: discord.Interaction, pesan: str, judul: str = "📢 Pengumuman"):
     role_asal = role_pengumuman_user(interaction.user)
     if role_asal is None:
@@ -784,11 +783,5 @@ async def umumkan(interaction: discord.Interaction, pesan: str, judul: str = "�
         await interaction.response.send_message(
             f"❌ Bot tidak punya izin mengirim pesan di {channel.mention}.", ephemeral=True
         )
-
-@bot.tree.command(name="umumkan", description="Kirim pengumuman ke channel role kamu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    pesan="Isi pengumuman",
-    judul="Judul pengumuman (opsional)",
-)
 # ====== JALANKAN BOT ======
 bot.run(TOKEN)
