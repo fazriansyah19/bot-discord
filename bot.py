@@ -43,6 +43,18 @@ cursor.execute('''
 ''')
 conn.commit()
 
+# Tabel aliansi klan
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS aliansi (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nama_klan TEXT NOT NULL UNIQUE,
+        deskripsi TEXT,
+        status TEXT DEFAULT 'Aktif',
+        tanggal TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+''')
+conn.commit()
+
 # Migrasi otomatis: kalau tabel lama masih punya kolom job, pindahkan ke anggota_job
 try:
     cursor.execute("PRAGMA table_info(anggota)")
@@ -582,5 +594,201 @@ async def setupjob(interaction: discord.Interaction):
         await interaction.response.send_message(
             f"❌ Gagal mengirim pesan pilih-job: {e}", ephemeral=True
         )
+
+# ====== FITUR ALIANSI ======
+
+class AliansiGroup(app_commands.Group):
+    def __init__(self):
+        super().__init__(name="aliansi", description="Kelola daftar aliansi klan")
+
+
+aliansi_group = AliansiGroup()
+
+
+@aliansi_group.command(name="tambah", description="Tambah klan aliansi (khusus Ketua/Tetua)")
+@app_commands.describe(
+    nama="Nama klan aliansi",
+    deskripsi="Deskripsi singkat (opsional)",
+    status="Status aliansi (default: Aktif)",
+)
+async def aliansi_tambah(interaction: discord.Interaction, nama: str, deskripsi: str = "-", status: str = "Aktif"):
+    if not is_admin_klan(interaction.user):
+        await interaction.response.send_message(
+            "❌ Hanya Ketua/Tetua yang boleh menambah aliansi.", ephemeral=True
+        )
+        return
+
+    try:
+        cursor.execute(
+            "INSERT INTO aliansi (nama_klan, deskripsi, status) VALUES (?, ?, ?)",
+            (nama, deskripsi, status)
+        )
+        conn.commit()
+        await interaction.response.send_message(
+            f"✅ Aliansi **{nama}** ditambahkan.\n"
+            f"**Status:** {status}\n"
+            f"**Deskripsi:** {deskripsi}",
+            ephemeral=True
+        )
+    except sqlite3.IntegrityError:
+        await interaction.response.send_message(
+            f"⚠️ Aliansi **{nama}** sudah ada di daftar.", ephemeral=True
+        )
+
+
+@aliansi_group.command(name="hapus", description="Hapus klan aliansi (khusus Ketua/Tetua)")
+@app_commands.describe(nama="Nama klan aliansi yang dihapus")
+async def aliansi_hapus(interaction: discord.Interaction, nama: str):
+    if not is_admin_klan(interaction.user):
+        await interaction.response.send_message(
+            "❌ Hanya Ketua/Tetua yang boleh menghapus aliansi.", ephemeral=True
+        )
+        return
+
+    cursor.execute("DELETE FROM aliansi WHERE LOWER(nama_klan) = ?", (nama.lower(),))
+    conn.commit()
+
+    if cursor.rowcount == 0:
+        await interaction.response.send_message(
+            f"⚠️ Aliansi **{nama}** tidak ditemukan.", ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"✅ Aliansi **{nama}** dihapus.", ephemeral=True
+        )
+
+
+@aliansi_group.command(name="daftar", description="Lihat semua aliansi klan")
+async def aliansi_daftar(interaction: discord.Interaction):
+    cursor.execute("SELECT nama_klan, deskripsi, status, tanggal FROM aliansi ORDER BY nama_klan")
+    semua = cursor.fetchall()
+
+    if not semua:
+        await interaction.response.send_message(
+            "Belum ada aliansi yang terdaftar.", ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(
+        title="🤝 Daftar Aliansi Klan",
+        color=discord.Color.teal()
+    )
+    for nama, deskripsi, status, tgl in semua:
+        embed.add_field(
+            name=f"{nama} — {status}",
+            value=f"{deskripsi}\n*Ditambahkan: {tgl[:10]}*",
+            inline=False
+        )
+    embed.set_footer(text=f"Total: {len(semua)} aliansi")
+    await interaction.response.send_message(embed=embed)
+
+
+@aliansi_group.command(name="edit", description="Edit aliansi (khusus Ketua/Tetua)")
+@app_commands.describe(
+    nama="Nama klan aliansi yang diedit",
+    deskripsi_baru="Deskripsi baru (kosongkan jika tidak diubah)",
+    status_baru="Status baru (kosongkan jika tidak diubah)",
+)
+async def aliansi_edit(interaction: discord.Interaction, nama: str, deskripsi_baru: str = None, status_baru: str = None):
+    if not is_admin_klan(interaction.user):
+        await interaction.response.send_message(
+            "❌ Hanya Ketua/Tetua yang boleh mengedit aliansi.", ephemeral=True
+        )
+        return
+
+    cursor.execute("SELECT id FROM aliansi WHERE LOWER(nama_klan) = ?", (nama.lower(),))
+    if cursor.fetchone() is None:
+        await interaction.response.send_message(
+            f"⚠️ Aliansi **{nama}** tidak ditemukan.", ephemeral=True
+        )
+        return
+
+    if deskripsi_baru is not None:
+        cursor.execute("UPDATE aliansi SET deskripsi = ? WHERE LOWER(nama_klan) = ?", (deskripsi_baru, nama.lower()))
+    if status_baru is not None:
+        cursor.execute("UPDATE aliansi SET status = ? WHERE LOWER(nama_klan) = ?", (status_baru, nama.lower()))
+    conn.commit()
+
+    await interaction.response.send_message(
+        f"✅ Aliansi **{nama}** diperbarui.", ephemeral=True
+    )
+
+
+bot.tree.add_command(aliansi_group, guild=discord.Object(id=GUILD_ID))
+
+# ====== FITUR PENGUMUMAN (satu channel) ======
+
+def role_pengumuman_user(member: discord.Member) -> str | None:
+    """Kembalikan nama role yang diizinkan, atau None."""
+    nama_role = {r.name for r in member.roles}
+    if member.guild and member.guild.owner and member.id == member.guild.owner.id:
+        return "owner"
+    for role in ["Wakil Rakyat", "Budak Member"]:
+        if role in nama_role:
+            return role
+    return None
+
+
+@bot.tree.command(name="umumkan", description="Kirim pengumuman ke channel pengumuman", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    pesan="Isi pengumuman",
+    judul="Judul pengumuman (opsional)",
+)
+
+CHANNEL_PENGUMUMAN_ID = 1559960943465861120
+
+async def umumkan(interaction: discord.Interaction, pesan: str, judul: str = "📢 Pengumuman"):
+    role_asal = role_pengumuman_user(interaction.user)
+    if role_asal is None:
+        await interaction.response.send_message(
+            "❌ Kamu tidak punya role yang diizinkan membuat pengumuman.\n"
+            "Role yang diizinkan: **Wakil Rakyat**, **Budak Member**, atau **Owner**.",
+            ephemeral=True
+        )
+        return
+
+    if not CHANNEL_PENGUMUMAN_ID:
+        await interaction.response.send_message(
+            "❌ Channel pengumuman belum diatur.\n"
+            "Ketua/Tetua perlu mengisi `CHANNEL_PENGUMUMAN_ID` pada kode bot.",
+            ephemeral=True
+        )
+        return
+
+    channel = interaction.guild.get_channel(CHANNEL_PENGUMUMAN_ID)
+    if channel is None:
+        await interaction.response.send_message(
+            f"❌ Channel dengan ID `{CHANNEL_PENGUMUMAN_ID}` tidak ditemukan di server.",
+            ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(
+        title=judul,
+        description=pesan,
+        color=discord.Color.orange(),
+        timestamp=datetime.now()
+    )
+    embed.set_author(
+        name=interaction.user.display_name,
+        icon_url=interaction.user.display_avatar.url
+    )
+    embed.set_footer(text=f"Dikirim oleh {role_asal}")
+
+    try:
+        await channel.send(embed=embed)
+        await interaction.response.send_message(
+            f"✅ Pengumuman terkirim ke {channel.mention}.", ephemeral=True
+        )
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            f"❌ Bot tidak punya izin mengirim pesan di {channel.mention}.", ephemeral=True
+        )
+
+@bot.tree.command(name="umumkan", description="Kirim pengumuman ke channel role kamu", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    pesan="Isi pengumuman",
+    judul="Judul pengumuman (opsional)",
+)
 # ====== JALANKAN BOT ======
 bot.run(TOKEN)
