@@ -350,9 +350,11 @@ def is_admin_klan(member: discord.Member) -> bool:
 # ====== COMMAND /export ======
 @bot.tree.command(name="export", description="Backup database klan (khusus Ketua/Tetua)", guild=discord.Object(id=GUILD_ID))
 async def export_db(interaction: discord.Interaction):
-    if not is_admin_klan(interaction.user):
+    owner = interaction.guild.owner
+    if owner is None or interaction.user.id != owner.id:
         await interaction.response.send_message(
-            "❌ Hanya Ketua/Tetua yang boleh backup database.", ephemeral=True
+            "❌ Hanya **Owner server** yang boleh reset database.",
+            ephemeral=True
         )
         return
 
@@ -380,9 +382,11 @@ async def export_db(interaction: discord.Interaction):
 @bot.tree.command(name="import", description="Restore database klan dari file backup (khusus Ketua/Tetua)", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(file="File .db hasil /export sebelumnya")
 async def import_db(interaction: discord.Interaction, file: discord.Attachment):
-    if not is_admin_klan(interaction.user):
+    owner = interaction.guild.owner
+    if owner is None or interaction.user.id != owner.id:
         await interaction.response.send_message(
-            "❌ Hanya Ketua/Tetua yang boleh restore database.", ephemeral=True
+            "❌ Hanya **Owner server** yang boleh reset database.",
+            ephemeral=True
         )
         return
 
