@@ -13,11 +13,10 @@ GUILD_ID = 1559949579066146900
 DAFTAR_JOB = [
     "Ahli Bangunan",
     "Boss Penjahit",
-    "Pakar Senjata",
+    "Pakar Alat & Senjata",
     "Penyetok Barang",
-    "Pemburu Hewan",
-    "Supervisor MBG",
     "Petani",
+    "Supervisor MBG",
 ]
 
 # ====== DATABASE SETUP ======
@@ -467,6 +466,121 @@ async def import_db(interaction: discord.Interaction, file: discord.Attachment):
         f"Database lama disimpan sebagai `klan_lama.db` (tidak bisa diakses lewat bot).",
         ephemeral=True
     )
+
+# ====== DAFTAR JOB + EMOJI UNTUK REACTION ROLE ======
+JOB_EMOJI = {
+    "🏗️": "Ahli Bangunan",
+    "🧵": "Boss Penjahit",
+    "⚔️": "Pakar Alat & Senjata",
+    "📦": "Penyetok Barang",
+    "🧑‍🌾": "Petani",
+    "🧑‍🍳": "Supervisor MBG",
+}
+
+# Pesan pilih-job yang dikirim bot (disimpan agar bisa diedit nanti)
+PESAN_PILIH_JOB = None
+CHANNEL_PILIH_JOB_ID = 1559965318691029002  # ← isi dengan ID channel #pilih-job
+
+
+# ====== COMMAND: KIRIM PESAN PILIH JOB ======
+@bot.tree.command(name="setupjob", description="Kirim pesan pilih-job (khusus Ketua/Tetua)", guild=discord.Object(id=GUILD_ID))
+async def setupjob(interaction: discord.Interaction):
+    if not is_admin_klan(interaction.user):
+        await interaction.response.send_message(
+            "❌ Hanya Ketua/Tetua yang boleh menjalankan ini.", ephemeral=True
+        )
+        return
+
+    channel = interaction.guild.get_channel(CHANNEL_PILIH_JOB_ID)
+    if channel is None:
+        await interaction.response.send_message(
+            "❌ Channel #pilih-job tidak ditemukan. Cek CHANNEL_PILIH_JOB_ID di kode.",
+            ephemeral=True
+        )
+        return
+
+    teks = (
+        "**Pilih pekerjaanmu di klan ini dengan klik emoji di bawah:**\n\n"
+        "🏗️ = Ahli Bangunan\n"
+        "🧵 = Boss Penjahit\n"
+        "⚔️ = Pakar Alat & Senjata\n"
+        "📦 = Penyetok Barang\n"
+        "🧑‍🌾 = Petani\n"
+        "🧑‍🍳 = Supervisor MBG\n\n"
+        "*Klik lagi emoji yang sama untuk melepas role.*"
+    )
+
+    pesan = await channel.send(teks)
+    for emoji in JOB_EMOJI.keys():
+        await pesan.add_reaction(emoji)
+
+    await interaction.response.send_message(
+        f"✅ Pesan pilih-job dikirim di {channel.mention}.", ephemeral=True
+    )
+
+
+# ====== EVENT: REACTION TAMBAH ======
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    # Abaikan reaction dari bot (termasuk bot sendiri)
+    if payload.user_id == bot.user.id:
+        return
+    if payload.channel_id != CHANNEL_PILIH_JOB_ID:
+        return
+
+    emoji = str(payload.emoji)
+    if emoji not in JOB_EMOJI:
+        return
+
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return
+
+    member = guild.get_member(payload.user_id)
+    if member is None:
+        return
+
+    role_name = JOB_EMOJI[emoji]
+    role = discord.utils.get(guild.roles, name=role_name)
+    if role is None:
+        print(f"⚠️ Role '{role_name}' tidak ditemukan di server.")
+        return
+
+    try:
+        await member.add_roles(role, reason="Reaction role pilih-job")
+    except discord.Forbidden:
+        print(f"⚠️ Tidak bisa memberi role {role_name} ke {member.display_name}")
+
+
+# ====== EVENT: REACTION HAPUS ======
+@bot.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    if payload.user_id == bot.user.id:
+        return
+    if payload.channel_id != CHANNEL_PILIH_JOB_ID:
+        return
+
+    emoji = str(payload.emoji)
+    if emoji not in JOB_EMOJI:
+        return
+
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return
+
+    member = guild.get_member(payload.user_id)
+    if member is None:
+        return
+
+    role_name = JOB_EMOJI[emoji]
+    role = discord.utils.get(guild.roles, name=role_name)
+    if role is None:
+        return
+
+    try:
+        await member.remove_roles(role, reason="Reaction role dilepas")
+    except discord.Forbidden:
+        print(f"⚠️ Tidak bisa melepas role {role_name} dari {member.display_name}")
 
 # ====== JALANKAN BOT ======
 bot.run(TOKEN)
