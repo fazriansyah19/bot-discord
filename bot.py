@@ -63,6 +63,7 @@ except Exception as e:
 # ====== BOT SETUP ======
 intents = discord.Intents.default()
 intents.members = True
+intents.reactions = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ====== FUNGSI HELPER ======
@@ -338,13 +339,14 @@ async def carijob(interaction: discord.Interaction, job: str):
 
 # ====== CEK IZIN ADMIN KLAN ======
 def is_admin_klan(member: discord.Member) -> bool:
-    # Owner server selalu lolos
-    if member == member.guild.owner:
+    if member.guild is None:
+        return False
+    owner = member.guild.owner
+    if owner is not None and member.id == owner.id:
         return True
-    # Cek nama role
     nama_role = " ".join(r.name.lower() for r in member.roles)
-    return any(k in nama_role for k in ["Budak Member", "Wakil Rakyat"])
-
+    kata_kunci = ["ketua", "tetua", "wakil", "leader", "admin", "budak member", "wakil rakyat"]
+    return any(k in nama_role for k in kata_kunci)
 
 # ====== COMMAND /export ======
 @bot.tree.command(name="export", description="Backup database klan (khusus Ketua/Tetua)", guild=discord.Object(id=GUILD_ID))
@@ -470,22 +472,94 @@ async def import_db(interaction: discord.Interaction, file: discord.Attachment):
         ephemeral=True
     )
 
-# ====== DAFTAR JOB + EMOJI UNTUK REACTION ROLE ======
-JOB_EMOJI = {
-    "🏗️": "Ahli Bangunan",
-    "🧵": "Boss Penjahit",
-    "⚔️": "Pakar Alat & Senjata",
-    "📦": "Penyetok Barang",
-    "🧑‍🌾": "Petani",
-    "🧑‍🍳": "Supervisor MBG",
-}
+# ====== DAFTAR JOB ======
+DAFTAR_JOB = [
+    "Ahli Bangunan",
+    "Boss Penjahit",
+    "Pakar Alat & Senjata",
+    "Penyetok Barang",
+    "Petani",
+    "Supervisor MBG",
+]
 
-# Pesan pilih-job yang dikirim bot (disimpan agar bisa diedit nanti)
-PESAN_PILIH_JOB = None
-CHANNEL_PILIH_JOB_ID = 1559965318691029002  # ← isi dengan ID channel #pilih-job
+CHANNEL_PILIH_JOB_ID = 1559965318691029002
 
 
-# ====== COMMAND: KIRIM PESAN PILIH JOB ======
+# ====== VIEW: SELECT JOB LANGSUNG DI CHANNEL ======
+class PilihJobSelect(discord.ui.Select):
+    def __init__(self, guild: discord.Guild):
+        options = [
+            discord.SelectOption(label=nama, value=nama, emoji="⚒️")
+            for nama in DAFTAR_JOB
+        ]
+        super().__init__(
+            placeholder="Pilih job kamu di sini...",
+            min_values=0,                      # 0 = boleh lepas semua job
+            max_values=len(DAFTAR_JOB),
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        member = interaction.user
+        guild = interaction.guild
+        dipilih = set(self.values)
+        semua_role_job = set(DAFTAR_JOB)
+
+        # Role job yang saat ini dipegang member
+        dimiliki = {r.name for r in member.roles if r.name in semua_role_job}
+
+        tambah = dipilih - dimiliki
+        hapus = dimiliki - dipilih
+
+        gagal = []
+        for nama in tambah:
+            role = discord.utils.get(guild.roles, name=nama)
+            if role is None:
+                gagal.append(f"{nama} (role tidak ada)")
+                continue
+            try:
+                await member.add_roles(role, reason="Pilih job via menu")
+            except discord.Forbidden:
+                gagal.append(f"{nama} (izin ditolak)")
+
+        for nama in hapus:
+            role = discord.utils.get(guild.roles, name=nama)
+            if role is None:
+                continue
+            try:
+                await member.remove_roles(role, reason="Lepas job via menu")
+            except discord.Forbidden:
+                gagal.append(f"{nama} (izin ditolak)")
+
+        # Simpan ke database (sinkron dengan /daftar)
+        cursor.execute("DELETE FROM anggota_job WHERE discord_id = ?", (member.id,))
+        for nama in dipilih:
+            cursor.execute(
+                "INSERT OR IGNORE INTO anggota_job (discord_id, job) VALUES (?, ?)",
+                (member.id, nama),
+            )
+        conn.commit()
+
+        if dipilih:
+            teks = f"✅ Job kamu sekarang: **{', '.join(sorted(dipilih))}**"
+        else:
+            teks = "✅ Semua job kamu sudah dilepas."
+
+        if gagal:
+            teks += f"\n⚠️ Sebagian gagal: {', '.join(gagal)}"
+
+        await interaction.followup.send(teks, ephemeral=True)
+
+
+class PilihJobView(discord.ui.View):
+    def __init__(self, guild: discord.Guild):
+        super().__init__(timeout=None)   # tidak kedaluwarsa
+        self.add_item(PilihJobSelect(guild))
+
+
+# ====== COMMAND /setupjob ======
 @bot.tree.command(name="setupjob", description="Kirim pesan pilih-job (khusus Ketua/Tetua)", guild=discord.Object(id=GUILD_ID))
 async def setupjob(interaction: discord.Interaction):
     if not is_admin_klan(interaction.user):
@@ -497,93 +571,34 @@ async def setupjob(interaction: discord.Interaction):
     channel = interaction.guild.get_channel(CHANNEL_PILIH_JOB_ID)
     if channel is None:
         await interaction.response.send_message(
-            "❌ Channel #pilih-job tidak ditemukan. Cek CHANNEL_PILIH_JOB_ID di kode.",
+            "❌ Channel #pilih-job tidak ditemukan. Cek CHANNEL_PILIH_JOB_ID.",
             ephemeral=True
         )
         return
 
-    teks = (
-        "**Pilih pekerjaanmu di klan ini dengan klik emoji di bawah:**\n\n"
-        "🏗️ = Ahli Bangunan\n"
-        "🧵 = Boss Penjahit\n"
-        "⚔️ = Pakar Alat & Senjata\n"
-        "📦 = Penyetok Barang\n"
-        "🧑‍🌾 = Petani\n"
-        "🧑‍🍳 = Supervisor MBG\n\n"
-        "*Klik lagi emoji yang sama untuk melepas role.*"
+    embed = discord.Embed(
+        title="⚒️ Pilih Job Kamu",
+        description=(
+            "Klik dropdown di bawah untuk memilih job kamu.\n"
+            "**Bisa pilih lebih dari satu job.**\n\n"
+            "Job yang sudah aktif akan tetap terpasang — ubah pilihan kapan saja "
+            "dengan membuka dropdown ini lagi.\n\n"
+            "**Daftar job:**\n"
+            "🏗️ Ahli Bangunan\n"
+            "🧵 Boss Penjahit\n"
+            "⚔️ Pakar Alat & Senjata\n"
+            "📦 Penyetok Barang\n"
+            "🧑‍🌾 Petani\n"
+            "🧑‍🍳 Supervisor MBG"
+        ),
+        color=discord.Color.gold(),
     )
 
-    pesan = await channel.send(teks)
-    for emoji in JOB_EMOJI.keys():
-        await pesan.add_reaction(emoji)
+    await channel.send(embed=embed, view=PilihJobView(interaction.guild))
 
     await interaction.response.send_message(
         f"✅ Pesan pilih-job dikirim di {channel.mention}.", ephemeral=True
     )
-
-
-# ====== EVENT: REACTION TAMBAH ======
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    # Abaikan reaction dari bot (termasuk bot sendiri)
-    if payload.user_id == bot.user.id:
-        return
-    if payload.channel_id != CHANNEL_PILIH_JOB_ID:
-        return
-
-    emoji = str(payload.emoji)
-    if emoji not in JOB_EMOJI:
-        return
-
-    guild = bot.get_guild(payload.guild_id)
-    if guild is None:
-        return
-
-    member = guild.get_member(payload.user_id)
-    if member is None:
-        return
-
-    role_name = JOB_EMOJI[emoji]
-    role = discord.utils.get(guild.roles, name=role_name)
-    if role is None:
-        print(f"⚠️ Role '{role_name}' tidak ditemukan di server.")
-        return
-
-    try:
-        await member.add_roles(role, reason="Reaction role pilih-job")
-    except discord.Forbidden:
-        print(f"⚠️ Tidak bisa memberi role {role_name} ke {member.display_name}")
-
-
-# ====== EVENT: REACTION HAPUS ======
-@bot.event
-async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    if payload.user_id == bot.user.id:
-        return
-    if payload.channel_id != CHANNEL_PILIH_JOB_ID:
-        return
-
-    emoji = str(payload.emoji)
-    if emoji not in JOB_EMOJI:
-        return
-
-    guild = bot.get_guild(payload.guild_id)
-    if guild is None:
-        return
-
-    member = guild.get_member(payload.user_id)
-    if member is None:
-        return
-
-    role_name = JOB_EMOJI[emoji]
-    role = discord.utils.get(guild.roles, name=role_name)
-    if role is None:
-        return
-
-    try:
-        await member.remove_roles(role, reason="Reaction role dilepas")
-    except discord.Forbidden:
-        print(f"⚠️ Tidak bisa melepas role {role_name} dari {member.display_name}")
 
 # ====== JALANKAN BOT ======
 bot.run(TOKEN)
